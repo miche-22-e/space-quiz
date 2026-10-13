@@ -38,6 +38,9 @@
       --progress-fill: linear-gradient(90deg, #6366f1, #06b6d4);
       --badge-bg: #1e293b;
       --badge-text: #cbd5e1;
+      --timer-color: #c7d2fe;
+      --timer-warning: #fbbf24;
+      --timer-critical: #f87171;
       --explanation-bg: rgba(30, 41, 59, 0.8);
       --explanation-border: #3b82f6;
       --shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.5), 0 0 20px rgba(99, 102, 241, 0.1);
@@ -77,6 +80,9 @@
         --progress-fill: linear-gradient(90deg, #4f46e5, #0ea5e9);
         --badge-bg: #f1f5f9;
         --badge-text: #334155;
+        --timer-color: #4338ca;
+        --timer-warning: #b45309;
+        --timer-critical: #b91c1c;
         --explanation-bg: #eff6ff;
         --explanation-border: #3b82f6;
         --shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.08), 0 8px 10px -6px rgba(0, 0, 0, 0.04);
@@ -247,6 +253,22 @@
 
     .score-badge {
       color: #f59e0b;
+    }
+
+    .timer-badge {
+      color: var(--timer-color);
+      font-family: var(--font-mono);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .timer-badge.is-warning {
+      color: var(--timer-warning);
+      border-color: currentColor;
+    }
+
+    .timer-badge.is-critical {
+      color: var(--timer-critical);
+      border-color: currentColor;
     }
 
     /* Progress Bar */
@@ -652,6 +674,10 @@
             <span>⭐</span>
             <span id="scoreText">Score: 0</span>
           </span>
+          <span class="badge timer-badge" id="timerBadge" role="timer" aria-live="off" aria-label="Time remaining: 10 seconds">
+            <span aria-hidden="true">⏱</span>
+            <span id="timerText">00:10</span>
+          </span>
         </div>
 
         <!-- Progress Bar -->
@@ -844,6 +870,10 @@
     let currentQuestionIndex = 0;
     let score = 0;
     let answered = false;
+    const QUESTION_TIME_LIMIT = 10;
+    let remainingSeconds = QUESTION_TIME_LIMIT;
+    let timerInterval = null;
+    let timerDeadline = null;
     const personalBestStorageKey = 'spaceQuizPersonalBest';
 
     // Elements
@@ -856,9 +886,12 @@
     const questionText = document.getElementById('questionText');
     const optionsGrid = document.getElementById('optionsGrid');
     const explanationBox = document.getElementById('explanationBox');
+    const explanationTitle = document.getElementById('explanationTitle');
     const explanationText = document.getElementById('explanationText');
     const nextBtn = document.getElementById('nextBtn');
     const restartBtn = document.getElementById('restartBtn');
+    const timerBadge = document.getElementById('timerBadge');
+    const timerText = document.getElementById('timerText');
     const personalBestBadge = document.getElementById('personalBestBadge');
     const recordStatus = document.getElementById('recordStatus');
     const resultsRecord = document.getElementById('resultsRecord');
@@ -943,7 +976,38 @@
       resetBestBtn.disabled = false;
     }
 
+    function stopQuestionTimer() {
+      if (timerInterval !== null) {
+        clearInterval(timerInterval);
+        timerInterval = null;
+      }
+      timerDeadline = null;
+    }
+
+    function updateTimerDisplay(seconds) {
+      remainingSeconds = seconds;
+      timerText.textContent = `00:${String(seconds).padStart(2, '0')}`;
+      timerBadge.setAttribute('aria-label', `Time remaining: ${seconds} seconds`);
+      timerBadge.classList.toggle('is-warning', seconds <= 5 && seconds > 3);
+      timerBadge.classList.toggle('is-critical', seconds <= 3);
+    }
+
+    function startQuestionTimer() {
+      stopQuestionTimer();
+      updateTimerDisplay(QUESTION_TIME_LIMIT);
+      timerDeadline = Date.now() + QUESTION_TIME_LIMIT * 1000;
+      timerInterval = setInterval(() => {
+        const secondsRemaining = Math.max(0, Math.ceil((timerDeadline - Date.now()) / 1000));
+        if (secondsRemaining !== remainingSeconds) updateTimerDisplay(secondsRemaining);
+        if (secondsRemaining === 0) {
+          stopQuestionTimer();
+          handleAnswer(null, null, true);
+        }
+      }, 200);
+    }
+
     function loadQuestion() {
+      stopQuestionTimer();
       answered = false;
       const q = questions[currentQuestionIndex];
 
@@ -962,6 +1026,7 @@
       // Reset options & feedback
       optionsGrid.innerHTML = '';
       explanationBox.style.display = 'none';
+      explanationTitle.textContent = '💡 Did you know?';
       nextBtn.style.display = 'none';
 
       // Create option buttons
@@ -979,11 +1044,13 @@
         btn.addEventListener('click', () => handleAnswer(idx, btn));
         optionsGrid.appendChild(btn);
       });
+      startQuestionTimer();
     }
 
-    function handleAnswer(selectedIndex, selectedBtn) {
+    function handleAnswer(selectedIndex, selectedBtn, timedOut = false) {
       if (answered) return;
       answered = true;
+      stopQuestionTimer();
 
       const q = questions[currentQuestionIndex];
       const isCorrect = selectedIndex === q.answer;
@@ -998,8 +1065,10 @@
         selectedBtn.classList.add('correct');
         selectedBtn.querySelector('.option-icon').textContent = '✓';
       } else {
-        selectedBtn.classList.add('wrong');
-        selectedBtn.querySelector('.option-icon').textContent = '✗';
+        if (selectedBtn) {
+          selectedBtn.classList.add('wrong');
+          selectedBtn.querySelector('.option-icon').textContent = '✗';
+        }
         // Highlight the correct answer with green so user learns
         const correctBtn = buttons[q.answer];
         if (correctBtn) {
@@ -1009,6 +1078,7 @@
       }
 
       // Show explanation
+      if (timedOut) explanationTitle.textContent = '⏱ Time expired — answer revealed';
       explanationText.textContent = q.explanation;
       explanationBox.style.display = 'block';
 
@@ -1094,6 +1164,7 @@
     }
 
     function showResults() {
+      stopQuestionTimer();
       quizView.style.display = 'none';
       resultsView.style.display = 'block';
 
