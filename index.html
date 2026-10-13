@@ -189,6 +189,29 @@
       letter-spacing: 0.02em;
     }
 
+    .header-record-row {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      margin-top: 10px;
+    }
+
+    .personal-best-badge[hidden],
+    .record-status[hidden],
+    .results-record[hidden] {
+      display: none;
+    }
+
+    .record-status {
+      color: var(--text-muted);
+      font-size: 0.8rem;
+    }
+
+    .personal-best-badge {
+      color: var(--correct-tag);
+    }
+
     /* Card Wrapper */
     .quiz-card {
       background: var(--card-bg);
@@ -484,6 +507,45 @@
       margin-bottom: 24px;
     }
 
+    .results-record {
+      margin: -10px 0 14px;
+      color: var(--text-muted);
+      font-weight: 600;
+    }
+
+    .results-record.new-record {
+      color: var(--correct-tag);
+      font-size: 1.05rem;
+    }
+
+    .reset-record-btn {
+      display: block;
+      margin: 0 auto 16px;
+      padding: 8px 12px;
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      background: var(--badge-bg);
+      color: var(--badge-text);
+      font: inherit;
+      font-size: 0.85rem;
+      cursor: pointer;
+    }
+
+    .reset-record-btn:hover:not(:disabled) {
+      border-color: var(--primary);
+      color: var(--text-main);
+    }
+
+    .reset-record-btn:focus-visible {
+      outline: 3px solid var(--primary);
+      outline-offset: 3px;
+    }
+
+    .reset-record-btn:disabled {
+      cursor: not-allowed;
+      opacity: 0.6;
+    }
+
     .results-score-card {
       background: var(--option-bg);
       border: 1px solid var(--card-border);
@@ -570,6 +632,10 @@
     <header class="quiz-header">
       <h1><span class="mc-beacon" aria-hidden="true"></span> MISSION CONTROL // SPACE EXPLORATION QUIZ</h1>
       <p>Telemetry online • Test your cosmic knowledge across missions & discoveries</p>
+      <div class="header-record-row">
+        <span class="badge personal-best-badge" id="personalBestBadge" hidden></span>
+        <span class="record-status" id="recordStatus" role="status" aria-live="polite" hidden></span>
+      </div>
     </header>
 
     <!-- Quiz Main Card -->
@@ -623,8 +689,10 @@
           <span>FLIGHT QUALIFIED // MISSION SUCCESS</span>
         </div>
         <div class="results-emoji" id="resultsEmoji">🚀</div>
-        <h2 class="results-title" id="resultsTitle">Mission Complete!</h2>
+        <h2 class="results-title" id="resultsTitle" tabindex="-1">Mission Complete!</h2>
         <p class="results-subtitle" id="resultsSubtitle">Here is how you performed among the stars:</p>
+        <p class="results-record" id="resultsRecord" role="status" aria-live="polite" hidden></p>
+        <button class="reset-record-btn" id="resetBestBtn" type="button" disabled>Reset personal best</button>
 
         <div class="results-score-card">
           <div class="score-stat">
@@ -776,6 +844,7 @@
     let currentQuestionIndex = 0;
     let score = 0;
     let answered = false;
+    const personalBestStorageKey = 'spaceQuizPersonalBest';
 
     // Elements
     const quizView = document.getElementById('quizView');
@@ -790,6 +859,10 @@
     const explanationText = document.getElementById('explanationText');
     const nextBtn = document.getElementById('nextBtn');
     const restartBtn = document.getElementById('restartBtn');
+    const personalBestBadge = document.getElementById('personalBestBadge');
+    const recordStatus = document.getElementById('recordStatus');
+    const resultsRecord = document.getElementById('resultsRecord');
+    const resetBestBtn = document.getElementById('resetBestBtn');
 
     // Results Elements
     const resultsEmoji = document.getElementById('resultsEmoji');
@@ -800,6 +873,75 @@
     const finalWrong = document.getElementById('finalWrong');
 
     const prefixes = ['A', 'B', 'C', 'D'];
+    let personalBest = null;
+
+    function showRecordStatus(message) {
+      recordStatus.textContent = message;
+      recordStatus.hidden = false;
+    }
+
+    function showRecordStorageError() {
+      showRecordStatus('Personal bests cannot be saved in this browser.');
+    }
+
+    function clearRecordStorageError() {
+      recordStatus.textContent = '';
+      recordStatus.hidden = true;
+    }
+
+    function readPersonalBest() {
+      try {
+        const savedValue = window.localStorage.getItem(personalBestStorageKey);
+        if (savedValue === null) return null;
+        if (!/^(0|[1-9]\d*)$/.test(savedValue)) {
+          showRecordStatus('An invalid saved personal best was ignored.');
+          return null;
+        }
+
+        const savedScore = Number(savedValue);
+        if (Number.isInteger(savedScore) && savedScore <= questions.length) return savedScore;
+        showRecordStatus('An invalid saved personal best was ignored.');
+        return null;
+      } catch {
+        showRecordStorageError();
+        return null;
+      }
+    }
+
+    function savePersonalBest(bestScore) {
+      try {
+        window.localStorage.setItem(personalBestStorageKey, String(bestScore));
+        clearRecordStorageError();
+        return true;
+      } catch {
+        showRecordStorageError();
+        return false;
+      }
+    }
+
+    function clearPersonalBest() {
+      try {
+        window.localStorage.removeItem(personalBestStorageKey);
+        clearRecordStorageError();
+        return true;
+      } catch {
+        showRecordStorageError();
+        return false;
+      }
+    }
+
+    function updatePersonalBestDisplay() {
+      if (personalBest === null) {
+        personalBestBadge.hidden = true;
+        personalBestBadge.textContent = '';
+        resetBestBtn.disabled = true;
+        return;
+      }
+
+      personalBestBadge.textContent = `Personal Best: ${personalBest}/${questions.length}`;
+      personalBestBadge.hidden = false;
+      resetBestBtn.disabled = false;
+    }
 
     function loadQuestion() {
       answered = false;
@@ -955,6 +1097,21 @@
       quizView.style.display = 'none';
       resultsView.style.display = 'block';
 
+      const isNewRecord = (personalBest === null || score > personalBest) && savePersonalBest(score);
+      if (isNewRecord) personalBest = score;
+      updatePersonalBestDisplay();
+
+      if (personalBest !== null) {
+        resultsRecord.textContent = isNewRecord
+          ? `New Record! Personal best: ${personalBest}/${questions.length}`
+          : `Personal best: ${personalBest}/${questions.length}`;
+        resultsRecord.classList.toggle('new-record', isNewRecord);
+      } else {
+        resultsRecord.textContent = 'Personal best is not available.';
+        resultsRecord.classList.remove('new-record');
+      }
+      resultsRecord.hidden = false;
+
       // Fill progress bar to 100%
       progressFill.style.width = '100%';
 
@@ -997,6 +1154,18 @@
         resultsTitle.textContent = 'Cosmic Rookie!';
         resultsSubtitle.textContent = 'Mission failed to reach orbit. Review the stars and launch again!';
       }
+
+      resultsTitle.focus();
+    }
+
+    function resetPersonalBest() {
+      if (personalBest === null || !window.confirm('Reset your saved personal best? This cannot be undone.')) return;
+      if (!clearPersonalBest()) return;
+
+      personalBest = null;
+      updatePersonalBestDisplay();
+      resultsRecord.textContent = 'Personal best cleared.';
+      resultsRecord.classList.remove('new-record');
     }
 
     function restartQuiz() {
@@ -1011,8 +1180,11 @@
 
     nextBtn.addEventListener('click', nextQuestion);
     restartBtn.addEventListener('click', restartQuiz);
+    resetBestBtn.addEventListener('click', resetPersonalBest);
 
     // Initial load
+    personalBest = readPersonalBest();
+    updatePersonalBestDisplay();
     loadQuestion();
   </script>
 </body>
